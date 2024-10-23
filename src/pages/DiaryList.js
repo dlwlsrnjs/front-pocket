@@ -271,8 +271,7 @@ function DiaryList(props) {
                     <Row>
                         <Col>
                             <div className="diarylist_box">
-                                <div className="desktop-view">일기 피드백</div>
-                                <div className="smartphone-view-text">일기 피드백</div>
+                                <div className="desktop-view">FeedBack</div>
                                 <div className="desktop-view">피드백 미완료: {unfinishedFeedbackCount}</div>
                                 <div className="smartphone-view-text">피드백 미완료: {unfinishedFeedbackCount}</div>
                             </div>
