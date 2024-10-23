@@ -69,7 +69,7 @@ function Writing(props) {
     const current = new Date();
     const date = `${current.getFullYear()}년 ${current.getMonth() + 1}월 ${current.getDate()}일`;
 
-
+    
 
     const phq1 = useRef(null)
     const phq2 = useRef(null)
@@ -254,7 +254,37 @@ function Writing(props) {
         }
     
     }, [userType]);  // userType이 변경될 때마다 실행
+
+        // 오늘 날짜를 "YYYY-MM-DD" 형식으로 반환하는 함수
+    function getTodayDate() {
+        const currentDate = new Date();
+        const year = currentDate.getFullYear();
+        const month = String(currentDate.getMonth() + 1).padStart(2, '0'); // 월은 0부터 시작하므로 1을 더해줌
+        const day = String(currentDate.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`; // "YYYY-MM-DD" 형식으로 날짜 반환
+    }
+    // 병렬로 진단 결과를 저장하는 함수
+    async function saveDiagnosisToFirestore(counselorDiagnosis, doctorDiagnosis, pocketMindDiagnosis, userMail) {
+        try {
+            // 오늘 날짜로 컬렉션 이름 생성
+            const todayDate = getTodayDate();
+
+            await setDoc(doc(db, "diagnosis", props.userMail, "dates", todayDate), {
+                counselorDiagnosis: counselorDiagnosis || '진단 결과 없음',
+                doctorDiagnosis: doctorDiagnosis || '진단 결과 없음',
+                pocketMindDiagnosis: pocketMindDiagnosis || '진단 결과 없음',
+                date: todayDate, // 저장 날짜 추가
+                userMail: props.userMail // 사용자 이메일 추가
+            }, {merge: true})
+
+            console.log("Firestore에 진단 결과 저장 완료:", userMail, todayDate);
+        } catch (error) {
+            console.error("Firestore에 진단 결과 저장 중 오류 발생:", error);
+        }
+    }
     
+
+
     // FCM 토큰을 생성하고, 백엔드에 전송하는 함수
     async function handleFCMToken(userEmail, userType) {
         try {
@@ -542,6 +572,7 @@ function Writing(props) {
             requestDoctorDiagnosis(diary),
             requestPocketMindDiagnosis(diary)
         ]);
+        await saveDiagnosisToFirestore(counselorDiagnosis, doctorDiagnosis, pocketMindDiagnosis, userMail);
 
         // // 진단 결과를 Firebase에 업데이트
         // await setDoc(doc(db, "session", props.userMail, "diary", session), {
@@ -742,6 +773,7 @@ function Writing(props) {
                 },
                 body: JSON.stringify({
                     diary: diary,
+                    userMail : props.userMail
                 }),
             });
             const data = await response.json();
@@ -925,7 +957,7 @@ function Writing(props) {
     }
 
     function sendEmail() {
-        const to = 'taewan@kaist.ac.kr';
+        const to = 'dlwlsrnjs8316@gmail.com';
     const subject = '[마음챙김]' + props.userMail + '새로운 일기 작성 ';
     const body = '새로운 일기가 작성됨. 사용자id: ' + props.userMail;
 
@@ -1089,7 +1121,7 @@ function Writing(props) {
                                 style={{backgroundColor: "007AFF", fontWeight: "600"}}
                                 onClick={() => {
                                     endSession();
-                                    handleShowDiagnosisModal();  // 모달 열기
+                                    handleShowDiagnosisModal();  // 모달 열기                            
                                 }}
                             >👍 오늘의 일기쓰기 완료!
                     </Button>
