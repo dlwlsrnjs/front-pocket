@@ -21,6 +21,9 @@ import {
 
 import { db } from "../firebase-config";
 
+
+
+
 function DiaryList(props) {
     const [diaryList, setDiaryList] = useState([]);
     const updateProgress = useRef(true);
@@ -31,11 +34,19 @@ function DiaryList(props) {
     const [editingFeedback, setEditingFeedback] = useState({}); // 피드백 수정 상태 저장
     const [unfinishedFeedbackCount, setUnfinishedFeedbackCount] = useState(0); // 피드백 미완료 개수
 
-        // 모달 상태 관리
+    // 모달 상태 관리
     const [showModal, setShowModal] = useState(false);
     const [currentPrompt, setCurrentPrompt] = useState("");  // 프롬프트 상태 관리
     const [selectedPatientEmail, setSelectedPatientEmail] = useState(null); // 선택한 환자의 이메일
     const [selectedSessionNumber, setSelectedSessionNumber] = useState(null); // 선택한 세션 번호
+
+    // AI 진단 모달 상태 관리
+    const [showDiagnosisModal, setShowDiagnosisModal] = useState(false);
+    const [aiDiagnosis, setAIDiagnosis] = useState({
+        counselorDiagnosis: '',
+        doctorDiagnosis: '',
+        pocketMindDiagnosis: ''
+    });
 
     // 사용자 유형을 Firestore에서 확인하여 의사 또는 환자 구분
     useEffect(() => {
@@ -74,88 +85,34 @@ function DiaryList(props) {
         }
     }, [userType]);  // userType이 변경될 때마다 실행
 
-    async function getRelatedEmail(userMail, userType) {
-        console.log("Fetching related email for:", userMail, userType);
-
-        try {
-            if (userType === "patient") {
-                // 'patient' 컬렉션에서 환자의 이메일을 사용하여 문서를 가져옴
-                const patientDocRef = doc(db, 'patient', props.userMail);
-                const patientDoc = await getDoc(patientDocRef);
-        
-                if (patientDoc.exists()) {
-                    // 문서가 존재할 경우 담당 의사 정보 가져오기
-                    const doctorEmail = patientDoc.data().doctor;
-                        console.log(doctorEmail[0]);
-                        return doctorEmail[0];  // 배열이면 첫 번째 이메일만 사용
-                } else {
-                    console.error("해당 환자 담당, 의사 문서가 존재하지 않습니다.");
-                    return null;
-                }
-            } else if (userType === "doctor") {
-                // 'doctor' 컬렉션에서 의사의 이메일을 사용하여 문서를 가져옴
-                const doctorDocRef = doc(db, 'doctor', props.userMail);
-                const doctorDoc = await getDoc(doctorDocRef);
-        
-                if (doctorDoc.exists()) {
-                    // 문서가 존재할 경우 담당 환자 목록 가져오기
-                    const patientEmail = doctorDoc.data().patient;
-                        console.log(patientEmail[0]);
-                        return patientEmail[0];  // 환자 이메일 반환
-                } else {
-                    console.error("해당 의사 관련, 환자의 문서가 존재하지 않습니다.");
-                    return null;
-                }
-            } else {
-                console.log(userType);
-                console.error("올바른 userType을 전달해주세요. 'patient' 또는 'doctor'만 가능합니다.");
-                return null;
-            }
-        } catch (error) {
-            console.error("의사 또는 환자 정보를 가져오는 중 오류 발생:", error);
-            return null;
-        }
-    }
-    
-    async function sendDiaryNotificationToBackend(email, diaryContent) {
-        try {
-            console.log("Starting to send notification to backend...");
-            console.log("email:", email);
-            console.log("Diary content (first 20 characters):", diaryContent.slice(0, 20));
-            console.log(userType)
-            const notificationTitle = userType === "patient"
-                ? `${props.userMail} 환자 일기 알림`  // 환자가 접속한 경우 담당 의사에게 보낼 제목 (환자 이메일 포함)
-                : '새로운 피드백 알림';  // 의사가 접속한 경우 환자에게 보낼 제목
-        
-            const notificationBody = userType === "patient"
-                ? `${props.userMail} 환자가 새로운 일기를 작성했습니다: ${diaryContent.slice(0, 20)}...`  // 환자가 접속했으니 의사에게 보낼 메시지 (환자 이메일 포함)
-                : `의사가 새로운 피드백을 남겼습니다`;  // 의사가 접속했으니 환자에게 보낼 피드백 메시지
-
-            const response = await fetch('https://pocket-mind-bot-43dbd1ff9e7a.herokuapp.com/fcm/send-notification', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    email: email,
-                    title: notificationTitle,
-                    body: notificationBody,
-                    userType : userType
-                }),
+    // AI 진단 결과 데이터를 Firestore에서 불러오는 함수
+    const fetchDiagnosisData = async (userMail, date) => {
+        const diagnosisDocRef = doc(db, "diagnosis", userMail, "dates", date);
+        const diagnosisDoc = await getDoc(diagnosisDocRef);
+        if (diagnosisDoc.exists()) {
+            const data = diagnosisDoc.data();
+            setAIDiagnosis({
+                counselorDiagnosis: data.counselorDiagnosis || '상담사 진단 없음',
+                doctorDiagnosis: data.doctorDiagnosis || '의사 진단 없음',
+                pocketMindDiagnosis: data.pocketMindDiagnosis || 'Pocket-Mind 진단 없음'
             });
-            console.log("Fetch request sent. Waiting for response...");
-
-            if (!response.ok) {
-                const errorData = await response.text();
-                console.error('Error sending notification:', errorData);
-            } else {
-                const result = await response.json();
-                console.log('Notification sent successfully:', result);
-            }
-        } catch (error) {
-            console.error('Error sending notification to backend:', error);
+        } else {
+            setAIDiagnosis({
+                counselorDiagnosis: '상담사 진단 없음',
+                doctorDiagnosis: '의사 진단 없음',
+                pocketMindDiagnosis: 'Pocket-Mind 진단 없음'
+            });
         }
-    }
+        setShowDiagnosisModal(true);
+    };
+
+    const handleDiagnosisView = async (userMail, date) => {
+        console.log(userMail)
+        console.log(date)
+        await fetchDiagnosisData(userMail, date);
+    };
+
+
 
     const handlePromptEdit = async (patientEmail) => {
         setSelectedPatientEmail(patientEmail);
@@ -178,6 +135,97 @@ function DiaryList(props) {
         setShowModal(false); // 모달창 닫기
         alert("프롬프트가 성공적으로 저장되었습니다.");
     };
+
+    async function getRelatedEmail(userMail, userType) {
+        console.log("Fetching related email for:", userMail, userType);
+
+        try {
+            if (userType === "patient") {
+                // 'patient' 컬렉션에서 환자의 이메일을 사용하여 문서를 가져옴
+                const patientDocRef = doc(db, 'patient', props.userMail);
+                const patientDoc = await getDoc(patientDocRef);
+
+                if (patientDoc.exists()) {
+                    // 문서가 존재할 경우 담당 의사 정보 가져오기
+                    const doctorEmail = patientDoc.data().doctor;
+                    console.log(doctorEmail[0]);
+                    return doctorEmail[0];  // 배열이면 첫 번째 이메일만 사용
+                } else {
+                    console.error("해당 환자 담당, 의사 문서가 존재하지 않습니다.");
+                    return null;
+                }
+            } else if (userType === "doctor") {
+                // 'doctor' 컬렉션에서 의사의 이메일을 사용하여 문서를 가져옴
+                const doctorDocRef = doc(db, 'doctor', props.userMail);
+                const doctorDoc = await getDoc(doctorDocRef);
+
+                if (doctorDoc.exists()) {
+                    // 문서가 존재할 경우 담당 환자 목록 가져오기
+                    const patientEmail = doctorDoc.data().patient;
+                    console.log(patientEmail[0]);
+                    return patientEmail[0];  // 환자 이메일 반환
+                } else {
+                    console.error("해당 의사 관련, 환자의 문서가 존재하지 않습니다.");
+                    return null;
+                }
+            } else {
+                console.log(userType);
+                console.error("올바른 userType을 전달해주세요. 'patient' 또는 'doctor'만 가능합니다.");
+                return null;
+            }
+        } catch (error) {
+            console.error("의사 또는 환자 정보를 가져오는 중 오류 발생:", error);
+            return null;
+        }
+    }
+
+    function Unix_timestamp_to_YYYYMMDD(t) {
+        const date = new Date(t * 1000); // Unix 타임스탬프를 Date 객체로 변환
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`; // "YYYY-MM-DD" 형식으로 반환
+    }
+
+    async function sendDiaryNotificationToBackend(email, Content) {
+        try {
+            console.log("Starting to send notification to backend...");
+            console.log("email:", email);
+            console.log("Diary content (first 20 characters):", Content.slice(0, 20));
+            console.log(userType)
+            const notificationTitle = userType === "patient"
+                ? `${props.userMail} 환자 일기 알림`  // 환자가 접속한 경우 담당 의사에게 보낼 제목 (환자 이메일 포함)
+                : '새로운 피드백 알림';  // 의사가 접속한 경우 환자에게 보낼 제목
+
+            const notificationBody = userType === "patient"
+                ? `${props.userMail} 환자가 새로운 일기를 작성했습니다: ${Content.slice(0, 20)}...`  // 환자가 접속했으니 의사에게 보낼 메시지 (환자 이메일 포함)
+                : `담당 상담사(의사)가 새로운 피드백을 남겼습니다`;  // 의사가 접속했으니 환자에게 보낼 피드백 메시지
+
+            const response = await fetch('https://pocket-mind-bot-43dbd1ff9e7a.herokuapp.com/fcm/send-notification', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    email: email,
+                    title: notificationTitle,
+                    body: notificationBody,
+                    userType: userType
+                }),
+            });
+            console.log("Fetch request sent. Waiting for response...");
+
+            if (!response.ok) {
+                const errorData = await response.text();
+                console.error('Error sending notification:', errorData);
+            } else {
+                const result = await response.json();
+                console.log('Notification sent successfully:', result);
+            }
+        } catch (error) {
+            console.error('Error sending notification to backend:', error);
+        }
+    }
 
     function Unix_timestamp(t) {
         const date = new Date(t * 1000);
@@ -236,10 +284,11 @@ function DiaryList(props) {
                 feedback: feedbackText
             });
             console.log("피드백 저장 완료:", feedbackText);
+            // Firestore에서 담당 의사, 관련 환자 정보를 가져옴
             const relatedEmail = await getRelatedEmail(props.userMail, userType);
-    
+
             if (relatedEmail) {
-                await sendDiaryNotificationToBackend(relatedEmail, diary);  // 담당 의사의 이메일과 일기내용 전달
+                await sendDiaryNotificationToBackend(relatedEmail, feedbackText);  // 담당 의사의 이메일과 일기내용 전달
             } else {
                 console.error("정보를 가져올 수 없습니다.");
             }
@@ -361,209 +410,256 @@ function DiaryList(props) {
                     <Row>
                         <Col>
                             <div className="diarylist_box">
-                                <div className="desktop-view">FeedBack</div>
+                                <div className="desktop-view">일기 피드백</div>
+                                <div className="smartphone-view-text">일기 피드백</div>
                                 <div className="desktop-view">피드백 미완료: {unfinishedFeedbackCount}</div>
                                 <div className="smartphone-view-text">피드백 미완료: {unfinishedFeedbackCount}</div>
                             </div>
                         </Col>
                     </Row>
                     <Row>
-                    <div className="desktop-view">
-                        <div className="writing_box">
-                            <Row xs={'auto'} md={1} className="g-4">
-                                {diaryList.map((diary, idx) => (
-                                    <Col key={idx}>
-                                        <Card style={{ width: '100%' }}>
-                                            <Card.Body>
-                                                <Card.Title>{diary.sessionEnd ? Unix_timestamp(diary["sessionEnd"]) : "작성일 없음"}</Card.Title>
-                                                <Card.Subtitle className="mb-2 text-muted">
-                                                    <div className="nav_title_blue desktop-view">
-                                                        {diary.sessionEnd ? Unix_timestamp2(diary["sessionEnd"]) : "작성 시간 없음"}
-                                                    </div>
-                                                    <div className="nav_title_blue smartphone-view-text">
-                                                        {diary.sessionEnd ? Unix_timestamp2(diary["sessionEnd"]) : "작성 시간 없음"}
-                                                    </div>
-                                                    {userType === "doctor" && (
-                                                        <div className="nav_title_blue">환자 이메일: {diary.patientEmail}
-                                                        <Button
-                                                        variant="secondary"
-                                                        onClick={() => handlePromptEdit(diary.patientEmail)}
-                                                        >
-                                                        프롬프트 확인/수정
-                                                        </Button>
+                        <div className="desktop-view">
+                            <div className="writing_box">
+                                <Row xs={'auto'} md={1} className="g-4">
+                                    {diaryList.map((diary, idx) => (
+                                        <Col key={idx}>
+                                            <Card style={{ width: '100%' }}>
+                                                <Card.Body>
+                                                    <Card.Title>{diary.sessionEnd ? Unix_timestamp(diary["sessionEnd"]) : "작성일 없음"}</Card.Title>
+                                                    <Card.Subtitle className="mb-2 text-muted">
+                                                        <div className="nav_title_blue desktop-view">
+                                                            {diary.sessionEnd ? Unix_timestamp2(diary["sessionEnd"]) : "작성 시간 없음"}
                                                         </div>
-                                                    )}
-                                                </Card.Subtitle>
-                                                <Card.Text>{diary["diary"]}</Card.Text>
-                                                <span className="likebutton" onClick={() => addLike(idx)}>️❤️</span> <b>{diary["like"]}</b>
-                                                <span className="likebutton" onClick={() => addMuscle(idx)}>&nbsp;&nbsp;&nbsp;💪️ </span><b>{diary["muscle"]}</b>
-                                                {userType === "doctor" ? (
-                                                    <>
-                                                        {editingFeedback[idx] ? (
-                                                            <Form.Group controlId={`feedbackForm-${idx}`}>
-                                                                <Form.Label>피드백 입력:</Form.Label>
-                                                                <Form.Control
-                                                                    as="textarea"
-                                                                    rows={3}
-                                                                    value={feedback[idx] || ""}
-                                                                    onChange={(e) => handleFeedbackChange(idx, e.target.value)}
-                                                                />
+                                                        <div className="nav_title_blue smartphone-view-text">
+                                                            {diary.sessionEnd ? Unix_timestamp2(diary["sessionEnd"]) : "작성 시간 없음"}
+                                                        </div>
+                                                        {userType === "doctor" && (
+                                                            <div className="nav_title_blue">환자 이메일: {diary.patientEmail}
                                                                 <Button
-                                                                    variant="primary"
-                                                                    onClick={() => handleFeedbackSubmit(idx, diary.patientEmail, diary.sessionNumber)}
+                                                                    variant="secondary"
+                                                                    onClick={() => handlePromptEdit(diary.patientEmail)}
                                                                 >
-                                                                    피드백 저장
-                                                                </Button>
-                                                                
-                                                            </Form.Group>
-                                                        ) : (
-                                                            <div>
-                                                                <strong>저장된 피드백:</strong> {diary.feedback || "피드백을 입력하세요"}
-                                                                <Button variant="link" onClick={() => toggleFeedbackEdit(idx)}>
-                                                                    {diary.feedback ? "수정하기" : "입력하기"}
+                                                                    프롬프트 확인/수정
                                                                 </Button>
                                                             </div>
                                                         )}
-                                                    </>
-                                                ) : (
-                                                    <div>
-                                                        <strong>저장된 피드백:</strong> {diary.feedback || "아직 피드백이 없습니다."}
-                                                    </div>
-                                                )}
-                                            </Card.Body>
-                                        </Card>
-                                    </Col>
-                                ))}
-                                <div className="footer"></div>
-                            </Row>
-                        </div>
-                    </div>
-                    <div className="smartphone-view-text">
-                        <div className="writing_box">
-                            <Row xs={'auto'} md={1} className="g-4">
-                                {diaryList.map((diary, idx) => (
-                                    <Col key={idx}>
-                                        <Card style={{ width: '100%' }}>
-                                            <Card.Body>
-                                                <Card.Title>{diary.sessionEnd ? Unix_timestamp(diary["sessionEnd"]) : "작성일 없음"}</Card.Title>
-                                                <Card.Subtitle className="mb-2 text-muted">
-                                                    <div className="nav_title_blue desktop-view">
-                                                        {diary.sessionEnd ? Unix_timestamp2(diary["sessionEnd"]) : "작성 시간 없음"}
-                                                    </div>
-                                                    <div className="nav_title_blue smartphone-view-text">
-                                                        {diary.sessionEnd ? Unix_timestamp2(diary["sessionEnd"]) : "작성 시간 없음"}
-                                                    </div>
-                                                    {userType === "doctor" && (
-                                                        <div className="nav_title_blue">환자 이메일: {diary.patientEmail}
                                                         <Button
-                                                        variant="secondary"
-                                                        onClick={() => handlePromptEdit(diary.patientEmail)}
+                                                            variant="info"
+                                                            onClick={() => handleDiagnosisView(diary.patientEmail, Unix_timestamp_to_YYYYMMDD(diary["sessionEnd"]))}
                                                         >
-                                                        프롬프트 확인/수정
+                                                            이날의 AI 진단 보기
                                                         </Button>
+                                                    </Card.Subtitle>
+                                                    <Card.Text>{diary["diary"]}</Card.Text>
+                                                    <span className="likebutton" onClick={() => addLike(idx)}>️❤️</span> <b>{diary["like"]}</b>
+                                                    <span className="likebutton" onClick={() => addMuscle(idx)}>&nbsp;&nbsp;&nbsp;💪️ </span><b>{diary["muscle"]}</b>
+                                                    {userType === "doctor" ? (
+                                                        <>
+                                                            {editingFeedback[idx] ? (
+                                                                <Form.Group controlId={`feedbackForm-${idx}`}>
+                                                                    <Form.Label>피드백 입력:</Form.Label>
+                                                                    <Form.Control
+                                                                        as="textarea"
+                                                                        rows={3}
+                                                                        value={feedback[idx] || ""}
+                                                                        onChange={(e) => handleFeedbackChange(idx, e.target.value)}
+                                                                    />
+                                                                    <Button
+                                                                        variant="primary"
+                                                                        onClick={() => handleFeedbackSubmit(idx, diary.patientEmail, diary.sessionNumber)}
+                                                                    >
+                                                                        피드백 저장
+                                                                    </Button>
+
+                                                                </Form.Group>
+                                                            ) : (
+                                                                <div>
+                                                                    <strong>저장된 피드백:</strong> {diary.feedback || "피드백을 입력하세요"}
+                                                                    <Button variant="link" onClick={() => toggleFeedbackEdit(idx)}>
+                                                                        {diary.feedback ? "수정하기" : "입력하기"}
+                                                                    </Button>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        <div>
+                                                            <strong>저장된 피드백:</strong> {diary.feedback || "아직 피드백이 없습니다."}
                                                         </div>
                                                     )}
-                                                </Card.Subtitle>
-                                                <Card.Text>{diary["diary"]}</Card.Text>
-                                                <span className="likebutton" onClick={() => addLike(idx)}>️❤️</span> <b>{diary["like"]}</b>
-                                                <span className="likebutton" onClick={() => addMuscle(idx)}>&nbsp;&nbsp;&nbsp;💪️ </span><b>{diary["muscle"]}</b>
-
-                                                {userType === "doctor" ? (
-                                                    <>
-                                                        {editingFeedback[idx] ? (
-                                                            <Form.Group controlId={`feedbackForm-${idx}`}>
-                                                                <Form.Label>피드백 입력:</Form.Label>
-                                                                <Form.Control
-                                                                    as="textarea"
-                                                                    rows={3}
-                                                                    value={feedback[idx] || ""}
-                                                                    onChange={(e) => handleFeedbackChange(idx, e.target.value)}
-                                                                />
+                                                </Card.Body>
+                                            </Card>
+                                        </Col>
+                                    ))}
+                                    <div className="footer"></div>
+                                </Row>
+                            </div>
+                        </div>
+                        <div className="smartphone-view-text">
+                            <div className="writing_box">
+                                <Row xs={'auto'} md={1} className="g-4">
+                                    {diaryList.map((diary, idx) => (
+                                        <Col key={idx}>
+                                            <Card style={{ width: '100%' }}>
+                                                <Card.Body>
+                                                    <Card.Title>{diary.sessionEnd ? Unix_timestamp(diary["sessionEnd"]) : "작성일 없음"}</Card.Title>
+                                                    <Card.Subtitle className="mb-2 text-muted">
+                                                        <div className="nav_title_blue desktop-view">
+                                                            {diary.sessionEnd ? Unix_timestamp2(diary["sessionEnd"]) : "작성 시간 없음"}
+                                                        </div>
+                                                        <div className="nav_title_blue smartphone-view-text">
+                                                            {diary.sessionEnd ? Unix_timestamp2(diary["sessionEnd"]) : "작성 시간 없음"}
+                                                        </div>
+                                                        {userType === "doctor" && (
+                                                            <div className="nav_title_blue">환자 이메일: {diary.patientEmail}
                                                                 <Button
-                                                                    variant="primary"
-                                                                    onClick={() => handleFeedbackSubmit(idx, diary.patientEmail, diary.sessionNumber)}
+                                                                    variant="secondary"
+                                                                    onClick={() => handlePromptEdit(diary.patientEmail)}
                                                                 >
-                                                                    피드백 저장
-                                                                </Button>
-
-                                                            </Form.Group>
-                                                        ) : (
-                                                            <div>
-                                                                <strong>저장된 피드백:</strong> {diary.feedback || "피드백을 입력하세요"}
-                                                                <Button variant="link" onClick={() => toggleFeedbackEdit(idx)}>
-                                                                    {diary.feedback ? "수정하기" : "입력하기"}
+                                                                    프롬프트 확인/수정
                                                                 </Button>
                                                             </div>
                                                         )}
-                                                    </>
-                                                ) : (
-                                                    <div>
-                                                        <strong>저장된 피드백:</strong> {diary.feedback || "아직 피드백이 없습니다."}
-                                                    </div>
-                                                )}
-                                            </Card.Body>
-                                        </Card>
-                                    </Col>
-                                ))}
-                                <div className="footer"></div>
-                            </Row>
+                                                    </Card.Subtitle>
+                                                    <Card.Text>{diary["diary"]}</Card.Text>
+                                                    <span className="likebutton" onClick={() => addLike(idx)}>️❤️</span> <b>{diary["like"]}</b>
+                                                    <span className="likebutton" onClick={() => addMuscle(idx)}>&nbsp;&nbsp;&nbsp;💪️ </span><b>{diary["muscle"]}</b>
+
+                                                    {userType === "doctor" ? (
+                                                        <>
+                                                            {editingFeedback[idx] ? (
+                                                                <Form.Group controlId={`feedbackForm-${idx}`}>
+                                                                    <Form.Label>피드백 입력:</Form.Label>
+                                                                    <Form.Control
+                                                                        as="textarea"
+                                                                        rows={3}
+                                                                        value={feedback[idx] || ""}
+                                                                        onChange={(e) => handleFeedbackChange(idx, e.target.value)}
+                                                                    />
+                                                                    <Button
+                                                                        variant="primary"
+                                                                        onClick={() => handleFeedbackSubmit(idx, diary.patientEmail, diary.sessionNumber)}
+                                                                    >
+                                                                        피드백 저장
+                                                                    </Button>
+
+                                                                </Form.Group>
+                                                            ) : (
+                                                                <div>
+                                                                    <strong>저장된 피드백:</strong> {diary.feedback || "피드백을 입력하세요"}
+                                                                    <Button variant="link" onClick={() => toggleFeedbackEdit(idx)}>
+                                                                        {diary.feedback ? "수정하기" : "입력하기"}
+                                                                    </Button>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    ) : (
+                                                        <div>
+                                                            <strong>저장된 피드백:</strong> {diary.feedback || "아직 피드백이 없습니다."}
+                                                        </div>
+                                                    )}
+                                                </Card.Body>
+                                            </Card>
+                                        </Col>
+                                    ))}
+                                    <div className="footer"></div>
+                                </Row>
+                            </div>
                         </div>
-                    </div>
                     </Row>
                 </Container>
                 <div className="desktop-view">
-                <Modal show={showModal} onHide={() => setShowModal(false)} centered>
-                <Modal.Header closeButton>
-                    <Modal.Title>프롬프트 수정</Modal.Title>
-                </Modal.Header>
-                <Modal.Body>
-                    <Form.Group controlId="promptTextarea">
-                        <Form.Label>현재 프롬프트:</Form.Label>
-                        <Form.Control
-                            as="textarea"
-                            rows={3}
-                            value={currentPrompt}
-                            onChange={(e) => setCurrentPrompt(e.target.value)}
-                        />
-                    </Form.Group>
-                </Modal.Body>
-                <Modal.Footer>
-                    <Button variant="secondary" onClick={() => setShowModal(false)}>
-                        취소
-                    </Button>
-                    <Button variant="primary" onClick={savePrompt}>
-                        저장
-                    </Button>
-                </Modal.Footer>
-            </Modal>
+                    <Modal show={showModal} onHide={() => setShowModal(false)} centered>
+                        <Modal.Header closeButton>
+                            <Modal.Title>프롬프트 수정</Modal.Title>
+                        </Modal.Header>
+                        <Modal.Body>
+                            <Form.Group controlId="promptTextarea">
+                                <Form.Label>현재 프롬프트:</Form.Label>
+                                <Form.Control
+                                    as="textarea"
+                                    rows={3}
+                                    value={currentPrompt}
+                                    onChange={(e) => setCurrentPrompt(e.target.value)}
+                                />
+                            </Form.Group>
+                        </Modal.Body>
+                        <Modal.Footer>
+                            <Button variant="secondary" onClick={() => setShowModal(false)}>
+                                취소
+                            </Button>
+                            <Button variant="primary" onClick={savePrompt}>
+                                저장
+                            </Button>
+                        </Modal.Footer>
+                    </Modal>
+                </div>
+                <div className="smartphone-view-text">
+                    <Modal show={showModal} onHide={() => setShowModal(false)} centered>
+                        <Modal.Header closeButton>
+                            <Modal.Title>프롬프트 수정</Modal.Title>
+                        </Modal.Header>
+                        <Modal.Body>
+                            <Form.Group controlId="promptTextarea">
+                                <Form.Label>현재 프롬프트:</Form.Label>
+                                <Form.Control
+                                    as="textarea"
+                                    rows={3}
+                                    value={currentPrompt}
+                                    onChange={(e) => setCurrentPrompt(e.target.value)}
+                                />
+                            </Form.Group>
+                        </Modal.Body>
+                        <Modal.Footer>
+                            <Button variant="secondary" onClick={() => setShowModal(false)}>
+                                취소
+                            </Button>
+                            <Button variant="primary" onClick={savePrompt}>
+                                저장
+                            </Button>
+                        </Modal.Footer>
+                    </Modal>
+                </div>
+                <div className="desktop-view">
+                <Modal show={showDiagnosisModal} onHide={() => setShowDiagnosisModal(false)} centered>
+                    <Modal.Header closeButton>
+                        <Modal.Title>AI 진단 결과</Modal.Title>
+                    </Modal.Header>
+                    <Modal.Body>
+                        <h5>상담사 모델 진단:</h5>
+                        <p>{aiDiagnosis.counselorDiagnosis}</p>
+                        <h5>의사 모델 진단:</h5>
+                        <p>{aiDiagnosis.doctorDiagnosis}</p>
+                        <h5>Pocket-Mind 모델 진단:</h5>
+                        <p>{aiDiagnosis.pocketMindDiagnosis}</p>
+                    </Modal.Body>
+                    <Modal.Footer>
+                        <Button variant="secondary" onClick={() => setShowDiagnosisModal(false)}>
+                            닫기
+                        </Button>
+                    </Modal.Footer>
+                </Modal>
+                </div>
+                <div className="smartphone-view-text">
+                <Modal show={showDiagnosisModal} onHide={() => setShowDiagnosisModal(false)} centered>
+                    <Modal.Header closeButton>
+                        <Modal.Title>AI 진단 결과</Modal.Title>
+                    </Modal.Header>
+                    <Modal.Body>
+                        <h5>상담사 모델 진단:</h5>
+                        <p>{aiDiagnosis.counselorDiagnosis}</p>
+                        <h5>의사 모델 진단:</h5>
+                        <p>{aiDiagnosis.doctorDiagnosis}</p>
+                        <h5>Pocket-Mind 모델 진단:</h5>
+                        <p>{aiDiagnosis.pocketMindDiagnosis}</p>
+                    </Modal.Body>
+                    <Modal.Footer>
+                        <Button variant="secondary" onClick={() => setShowDiagnosisModal(false)}>
+                            닫기
+                        </Button>
+                    </Modal.Footer>
+                </Modal>
+                </div>
             </div>
-            <div className="smartphone-view-text">
-                <Modal show={showModal} onHide={() => setShowModal(false)} centered>
-                <Modal.Header closeButton>
-                    <Modal.Title>프롬프트 수정</Modal.Title>
-                </Modal.Header>
-                <Modal.Body>
-                    <Form.Group controlId="promptTextarea">
-                        <Form.Label>현재 프롬프트:</Form.Label>
-                        <Form.Control
-                            as="textarea"
-                            rows={3}
-                            value={currentPrompt}
-                            onChange={(e) => setCurrentPrompt(e.target.value)}
-                        />
-                    </Form.Group>
-                </Modal.Body>
-                <Modal.Footer>
-                    <Button variant="secondary" onClick={() => setShowModal(false)}>
-                        취소
-                    </Button>
-                    <Button variant="primary" onClick={savePrompt}>
-                        저장
-                    </Button>
-                </Modal.Footer>
-            </Modal>
-            </div>
-        </div>
         );
     }
 }
